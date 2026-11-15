@@ -1,0 +1,17 @@
+{
+  "name": "xraynpc-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "XRayNPC web UI: static frontend for the chest X-ray analysis backend",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

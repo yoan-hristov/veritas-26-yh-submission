@@ -1,0 +1,15 @@
+# Render Blueprint for the XRayNPC frontend (Node web service).
+# The Python backend (backend/app.py) runs as its own service; point API_URL at it.
+services:
+  - type: web
+    name: xraynpc-frontend
+    runtime: node
+    plan: free
+    buildCommand: npm install --omit=dev
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: API_URL
+        sync: false

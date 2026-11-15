@@ -1,0 +1,1077 @@
+<!doctype html>
+<!--
+  XRayNPC frontend (single file, no build step).
+
+  Summary
+  - Layout follows the reference mockup: header; left column = model list (55%) + 3x2 samples (45%);
+    right column = stage (58%) + classification outputs (42%). Fixed single screen at >= 1100px,
+    document scroll below that, single column below 900px.
+  - Data: GET /health (retry every 4 s while the server wakes), GET /models (sorted 5..1, model 5
+    default), POST /analyze/{id} with FormData "file". AbortController cancels stale requests when a
+    new image or model is chosen. 502/503/504/network errors retry automatically.
+  - Stage: idle drop zone with UPLOAD IMAGE button, accepts JPEG/PNG up to 15 MB, plus sample drag/click.
+    Consent modal before the first image of a session (sessionStorage). Once loaded: image left, compact
+    5-node pipeline bar + Grad-CAM canvas right. Nodes pulse while waiting and resolve from data.stages
+    the moment the response arrives (no fake timers). Clicking a node shows backend detail + latency.
+  - Heatmap: 224x224 grayscale PNG colourised with a 5-stop LUT and stretched over the image, 0.45 opacity,
+    "Heatmap" toggle. Tier X (no heatmap) disables the toggle.
+  - Outputs: ResNet probabilities as bars, Gemini reader, decision headline coloured by risk, "Why" list.
+  - Deliberately skipped from FRONTEND.md: the 76px node diagram, SVG path draw-in and compaction step
+    (the mockup shows only the compact bar). "View benchmarks" is a no-op by request.
+  - API base: window.XRAY_CONFIG.apiBase from /config.js (server.js reads env API_URL).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>XRayNPC</title>
+<meta name="description" content="An advanced tool for X-ray image analysis">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Russo+One&display=swap" rel="stylesheet">
+<script src="/config.js"></script>
+<style>
+:root {
+  --bg: #060913;
+  --panel: rgba(13, 19, 33, 0.84);
+  --line: rgba(148, 163, 184, 0.14);
+  --raise: #131d33;
+  --text: #f8fafc;
+  --muted: #94a3b8;
+  --dim: #64748b;
+  --cyan: #22d3ee;
+  --blue: #2563eb;
+  --blue-h: #3b82f6;
+  --gold: #fbbf24;
+  --ok: #10b981;
+  --warn: #f59e0b;
+  --bad: #f43f5e;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --display: 'Russo One', system-ui, sans-serif;
+  --body: 'Inter', system-ui, sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { color-scheme: dark; }
+body {
+  min-height: 100dvh;
+  padding: 16px;
+  display: grid;
+  grid-template-rows: 72px auto;
+  gap: 16px;
+  background: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(56, 189, 248, 0.08), transparent), var(--bg);
+  color: var(--text);
+  font: 400 14px/1.45 var(--body);
+  -webkit-font-smoothing: antialiased;
+}
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+svg { width: 18px; height: 18px; flex: none; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.muted { color: var(--muted); font-size: 13px; }
+
+/* Header */
+header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 4px; }
+h1 { font: 400 40px/1 var(--display); color: var(--cyan); text-shadow: 0 0 24px rgba(34, 211, 238, 0.35); }
+.sub { margin-top: 6px; font-size: 15px; color: var(--muted); }
+.conn { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.conn[data-s="online"] { color: var(--ok); }
+.conn[data-s="waking"] { color: var(--warn); }
+
+/* Grid */
+main { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 16px; min-height: 0; }
+.col { display: grid; gap: 16px; min-height: 0; }
+.left { grid-template-rows: 55fr 45fr; }
+.right { grid-template-rows: 58fr 42fr; }
+.panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 14px;
+  background: var(--panel);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 18px 40px rgba(2, 6, 23, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+.ph { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.ph h2 { font-size: 14px; font-weight: 600; }
+.ph .meta { font-size: 12px; color: var(--muted); }
+.scroll { overflow-y: auto; scrollbar-width: thin; scrollbar-color: #26324c transparent; }
+.scroll::-webkit-scrollbar { width: 6px; }
+.scroll::-webkit-scrollbar-thumb { background: #26324c; border-radius: 6px; }
+
+/* Models */
+.models { flex: 1; display: flex; flex-direction: column; gap: 8px; padding: 3px 6px 3px 3px; margin: -3px -6px -3px -3px; }
+.model {
+  text-align: left;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(19, 29, 51, 0.45);
+  transition: transform 200ms var(--ease), border-color 200ms, box-shadow 200ms, background 200ms;
+}
+.model:hover { transform: translateY(-2px); background: var(--raise); }
+.model[aria-pressed="true"] { border-color: var(--ok); box-shadow: 0 0 18px rgba(16, 185, 129, 0.2); background: var(--raise); }
+.model b { display: block; font: 400 15px/1.3 var(--display); color: var(--text); }
+.model span {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-top: 2px;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+.linkbtn {
+  align-self: center;
+  margin-top: 10px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: color 200ms;
+}
+.linkbtn:hover { color: var(--text); }
+
+/* Samples */
+.samples { display: grid; grid-template-columns: repeat(3, minmax(0, 96px)); justify-content: space-between; align-content: start; gap: 10px 8px; }
+.sample { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; border-radius: 8px; transition: transform 200ms var(--ease); }
+.sample img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0a0f1c;
+  transition: border-color 200ms;
+}
+.sample:hover { transform: translateY(-2px); }
+.sample:hover img { border-color: var(--gold); }
+.sample span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--muted); }
+
+/* Stage: idle */
+.drop {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 16px;
+  text-align: center;
+  border: 1px dashed rgba(59, 130, 246, 0.38);
+  border-radius: 14px;
+  transition: border-color 200ms, background 200ms;
+}
+.stage.over .drop { border: 1px solid var(--blue-h); background: rgba(59, 130, 246, 0.08); }
+.stage.over[data-state="active"] { border-color: var(--blue-h); }
+.upload {
+  width: 100%;
+  max-width: 420px;
+  height: 120px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border-radius: 12px;
+  background: var(--blue);
+  color: #fff;
+  font: 400 28px/1 var(--display);
+  letter-spacing: 0.02em;
+  box-shadow: 0 12px 32px rgba(37, 99, 235, 0.25);
+  transition: transform 200ms var(--ease), background 200ms;
+}
+.upload svg { width: 28px; height: 28px; transition: color 200ms; }
+.upload:hover { transform: translateY(-2px); background: var(--blue-h); }
+.upload:hover svg { color: var(--gold); }
+.err { min-height: 1.3em; font-size: 13px; color: var(--bad); }
+
+/* Stage: active */
+.view { flex: 1; display: none; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; min-height: 0; }
+.stage[data-state="active"] .drop { display: none; }
+.stage[data-state="active"] .view { display: grid; }
+.pane { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.cap { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 28px; }
+.cap p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--muted); }
+.cap .err { min-height: 0; }
+.ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 200ms, border-color 200ms;
+}
+.ghost svg { width: 14px; height: 14px; transition: color 200ms; }
+.ghost:hover { background: var(--raise); }
+.ghost:hover svg { color: var(--gold); }
+.frame { position: relative; flex: 1; min-height: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: #000; }
+.frame img, .frame canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+
+/* Pipeline */
+.pipe-wrap { position: relative; }
+.pipe { position: relative; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.pipe::before {
+  content: "";
+  position: absolute;
+  top: 18px;
+  left: 10%;
+  right: 10%;
+  height: 1px;
+  background: rgba(148, 163, 184, 0.28);
+  transform-origin: left center;
+  animation: draw 700ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.node {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  border-radius: 8px;
+  animation: pop 400ms var(--ease) both;
+  animation-delay: calc(var(--i) * 90ms);
+}
+.ring {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 18px;
+  background: #0b1222;
+  color: var(--dim);
+  transition: color 300ms, border-color 300ms, box-shadow 300ms, background 200ms;
+}
+.ring svg { width: 16px; height: 16px; transition: color 200ms; }
+.node small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--muted); }
+.node small b { margin-right: 4px; font: 400 11px var(--display); color: var(--text); }
+.node:hover .ring svg { color: var(--gold); }
+.node[aria-expanded="true"] .ring { background: var(--raise); }
+.node[data-s="running"] .ring { color: var(--blue-h); border-color: var(--blue-h); animation: pulse 1.4s ease-in-out infinite; }
+.node[data-s="done"] .ring { color: var(--ok); border-color: var(--ok); box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.18); }
+.node[data-s="warn"] .ring { color: var(--warn); border-color: var(--warn); box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.14); }
+.node[data-s="fail"] .ring { color: var(--bad); border-color: var(--bad); box-shadow: 0 0 0 4px rgba(244, 63, 94, 0.14); }
+.node[data-s="skipped"] .ring { border-style: dashed; color: var(--dim); }
+.pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  z-index: 5;
+  padding: 10px 12px;
+  background: #0b1222;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 18px 40px rgba(2, 6, 23, 0.65);
+  font-size: 13px;
+}
+.pop h3 { margin-bottom: 6px; font-size: 13px; font-weight: 600; }
+.pop .row { display: flex; justify-content: space-between; gap: 12px; margin-top: 6px; }
+.pop .row span:last-child { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pop p { color: var(--muted); }
+
+/* Heatmap */
+.heat canvas { transition: opacity 900ms var(--ease), filter 900ms var(--ease); }
+.heat .base { opacity: 0.25; filter: blur(6px); }
+.heat .over { opacity: 0; }
+.heat.on .base { opacity: 1; filter: blur(0); }
+.heat.on.show .over { opacity: 0.45; }
+.tog {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(6, 9, 19, 0.8);
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 200ms, border-color 200ms, opacity 200ms;
+}
+.tog[aria-pressed="true"] { border-color: var(--blue-h); background: rgba(37, 99, 235, 0.3); }
+.tog:disabled { opacity: 0.4; }
+.note { position: absolute; left: 0; right: 0; bottom: 10px; z-index: 2; text-align: center; font-size: 12px; color: var(--muted); }
+
+/* Outputs */
+.cols { flex: 1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); min-height: 0; }
+.c { min-height: 0; padding: 0 16px; }
+.c:first-child { padding-left: 0; }
+.c:last-child { padding-right: 0; }
+.c:not(:last-child) { border-right: 1px solid var(--line); }
+.c h3 { margin-bottom: 10px; font-size: 14px; font-weight: 600; }
+.prob { margin-bottom: 10px; }
+.pl { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+.pct { font-family: var(--display); font-weight: 400; }
+.track { height: 6px; margin-top: 4px; overflow: hidden; border-radius: 3px; background: rgba(148, 163, 184, 0.12); }
+.track.wait {
+  background: linear-gradient(90deg, rgba(148, 163, 184, 0.08), rgba(148, 163, 184, 0.22), rgba(148, 163, 184, 0.08));
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+.fill { width: 0; height: 100%; border-radius: 3px; background: var(--blue); transition: width 700ms var(--ease); }
+.fill.top { background: var(--ok); }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 13px; }
+.kv dt { color: var(--muted); }
+.kv dd { text-align: right; }
+.headline { margin-bottom: 6px; font: 400 20px/1.2 var(--display); }
+.action { font-size: 13px; }
+.facts { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; font-size: 13px; color: var(--muted); }
+.facts b { font-weight: 500; color: var(--text); }
+.banner { margin-top: 6px; font-size: 13px; color: var(--warn); }
+.why { display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; font-weight: 500; transition: background 200ms; }
+.why:hover { background: var(--raise); }
+.why svg { width: 14px; height: 14px; transition: transform 200ms var(--ease); }
+.why[aria-expanded="true"] svg { transform: rotate(180deg); }
+.ev { margin-top: 8px; padding-left: 18px; font-size: 13px; color: var(--muted); }
+.ev li + li { margin-top: 4px; }
+.foot { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); text-align: center; font-size: 12px; color: var(--muted); }
+
+/* Consent modal */
+.modal { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 16px; background: rgba(2, 6, 23, 0.6); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+.modal[hidden] { display: none; }
+.dlg { width: 100%; max-width: 440px; padding: 22px; }
+.dlg h2 { margin-bottom: 10px; font-size: 18px; font-weight: 600; }
+.dlg p { color: var(--muted); }
+.dlg label { display: flex; align-items: center; gap: 10px; margin: 16px 0 18px; cursor: pointer; }
+.dlg input { width: 18px; height: 18px; accent-color: var(--blue); }
+.acts { display: flex; justify-content: flex-end; gap: 10px; }
+.primary { padding: 9px 18px; border-radius: 8px; background: var(--blue); color: #fff; font-weight: 600; transition: background 200ms, opacity 200ms; }
+.primary:hover:not(:disabled) { background: var(--blue-h); }
+.primary:disabled { opacity: 0.45; }
+
+@keyframes draw { from { transform: scaleX(0); } }
+@keyframes pop { from { opacity: 0; transform: translateY(6px) scale(0.9); } }
+@keyframes pulse { 50% { box-shadow: 0 0 0 6px rgba(59, 130, 246, 0.2); } }
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+
+/* Desktop: one fixed screen, only lists scroll */
+@media (min-width: 1100px) {
+  body { height: 100dvh; overflow: hidden; grid-template-rows: 72px minmax(0, 1fr); }
+  .cols .c { overflow-y: auto; scrollbar-width: thin; scrollbar-color: #26324c transparent; }
+}
+@media (max-width: 1099px) {
+  .left, .right { grid-template-rows: auto auto; }
+  .models { max-height: 320px; }
+  .stage { min-height: 480px; }
+}
+@media (max-width: 899px) {
+  body { grid-template-rows: auto auto; }
+  header { flex-wrap: wrap; }
+  h1 { font-size: 34px; }
+  main { grid-template-columns: minmax(0, 1fr); }
+  .samples { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .stage { min-height: 360px; }
+  .view { grid-template-columns: minmax(0, 1fr); }
+  .frame { flex: none; height: min(78vw, 380px); }
+  .upload { height: 100px; font-size: 24px; }
+  .cols { grid-template-columns: minmax(0, 1fr); }
+  .c, .c:first-child, .c:last-child { padding: 0; }
+  .c:not(:last-child) { border-right: 0; border-bottom: 1px solid var(--line); padding-bottom: 14px; margin-bottom: 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0s !important; animation-delay: 0s !important; animation-iteration-count: 1 !important; transition-duration: 0s !important; }
+}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>XRayNPC</h1>
+    <p class="sub">An advanced tool for X-ray image analysis</p>
+  </div>
+  <p class="conn" id="conn" data-s="connecting">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+    <span id="connText">Connecting...</span>
+  </p>
+</header>
+
+<main>
+  <div class="col left">
+    <section class="panel" aria-labelledby="mh">
+      <div class="ph"><h2 id="mh">Model selection</h2></div>
+      <div class="models scroll" id="models" aria-label="Models">
+        <p class="muted" id="modelsMsg">Connecting to the server.</p>
+      </div>
+      <button class="linkbtn" type="button" id="bench">View benchmarks</button>
+    </section>
+
+    <section class="panel" aria-labelledby="sh">
+      <div class="ph"><h2 id="sh">Sample images</h2><span class="meta">Drag or click</span></div>
+      <div class="samples scroll" id="samples"></div>
+    </section>
+  </div>
+
+  <div class="col right">
+    <section class="panel stage" id="stage" data-state="idle" aria-labelledby="stageH">
+      <h2 class="sr" id="stageH">Image and pipeline</h2>
+
+      <div class="drop" id="drop">
+        <button class="upload" type="button" id="uploadBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          UPLOAD IMAGE
+        </button>
+        <p class="muted">or drag a sample here</p>
+        <p class="err" id="dropErr" role="alert"></p>
+        <input type="file" id="fileInput" accept="image/jpeg,image/png" hidden>
+      </div>
+
+      <div class="view">
+        <div class="pane">
+          <div class="cap">
+            <p id="capText"></p>
+            <p class="err" id="stageErr" role="alert"></p>
+            <button class="ghost" type="button" id="resetBtn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+              New image
+            </button>
+          </div>
+          <div class="frame" id="photoFrame"><img id="photo" alt=""></div>
+        </div>
+
+        <div class="pane">
+          <div class="pipe-wrap">
+            <div class="pipe" id="pipe" aria-label="Analysis pipeline"></div>
+            <div class="pop" id="pop" hidden></div>
+          </div>
+          <div class="frame heat" id="heat">
+            <canvas class="base" id="base" role="img" aria-label="Grad-CAM heatmap over the same chest X-ray. Warmer areas influenced the result more."></canvas>
+            <canvas class="over" id="over" aria-hidden="true"></canvas>
+            <button class="tog" type="button" id="heatTog" aria-pressed="true" disabled>Heatmap</button>
+            <p class="note" id="heatNote"></p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel out" aria-labelledby="oh">
+      <div class="ph"><h2 id="oh">Classification outputs</h2><span class="meta" id="lat"></span></div>
+      <div class="cols">
+        <div class="c"><h3>ResNet-18 reader</h3><div id="c1"></div></div>
+        <div class="c"><h3>Gemini Decision 1 reader</h3><div id="c2"></div></div>
+        <div class="c"><h3>Decision</h3><div id="c3"></div></div>
+      </div>
+      <p class="foot">Prototype. Not medical advice.</p>
+    </section>
+  </div>
+</main>
+
+<div class="modal" id="modal" hidden>
+  <div class="panel dlg" role="dialog" aria-modal="true" aria-labelledby="dh" aria-describedby="dd">
+    <h2 id="dh">Before you continue</h2>
+    <p id="dd">Images are sent to this site's server and, for the second reader, to Google's Gemini API. Use public or demo images only. Do not upload real patient scans.</p>
+    <label><input type="checkbox" id="consentChk"> I confirm this is a public or demo image</label>
+    <div class="acts">
+      <button class="ghost" type="button" id="consentCancel">Cancel</button>
+      <button class="primary" type="button" id="consentGo" disabled>Continue</button>
+    </div>
+  </div>
+</div>
+
+<div class="sr" id="live" aria-live="polite"></div>
+
+<script>
+'use strict';
+
+const API_BASE = ((window.XRAY_CONFIG && window.XRAY_CONFIG.apiBase) || 'http://localhost:7860').replace(/\/+$/, '');
+const MAX_BYTES = 15 * 1024 * 1024;
+const TYPES = ['image/jpeg', 'image/png'];
+const RETRY_MS = 4000;
+const EASE = 'cubic-bezier(0.22, 1, 0.36, 1)';
+const CONSENT_KEY = 'xraynpc-consent';
+const SAMPLE_MIME = 'application/x-xraynpc-sample';
+const STARTING = 'The server is starting. Retrying.';
+const HTTP_ERR = {
+  404: 'This model is not available on the server.',
+  413: 'Image is too large (max 15 MB).',
+  422: 'Unreadable or unsupported image file.',
+  429: 'Rate limit reached. Please wait a moment and try again.'
+};
+const RISK_COLOR = { HIGH: 'var(--bad)', REVIEW: 'var(--warn)', LOW: 'var(--ok)', NONE: 'var(--muted)' };
+const RISK_WORD = { HIGH: 'High risk', REVIEW: 'Needs review', LOW: 'Low risk', NONE: 'No reading' };
+const TIER_COLOR = { A: 'var(--ok)', B: 'var(--warn)', C: 'var(--bad)', D: 'var(--warn)', X: 'var(--muted)' };
+const AGREE = { AGREE: 'Agree', DISAGREE: 'Disagree' };
+
+const svg = d => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const CHEVRON = svg('<polyline points="6 9 12 15 18 9"/>');
+const NODES = [
+  { label: 'Upload', ids: ['upload'], icon: svg('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>') },
+  { label: 'Preprocess', ids: ['preprocess', 'calibration'], icon: svg('<line x1="21" y1="4" x2="14" y2="4"/><line x1="10" y1="4" x2="3" y2="4"/><line x1="21" y1="12" x2="12" y2="12"/><line x1="8" y1="12" x2="3" y2="12"/><line x1="21" y1="20" x2="16" y2="20"/><line x1="12" y1="20" x2="3" y2="20"/><line x1="14" y1="2" x2="14" y2="6"/><line x1="8" y1="10" x2="8" y2="14"/><line x1="16" y1="18" x2="16" y2="22"/>') },
+  { label: 'Image check', ids: ['scope_check', 'gemini_reader'], icon: svg('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/>') },
+  { label: 'Classify', ids: ['resnet', 'gradcam'], icon: svg('<rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2"/>') },
+  { label: 'Decision', ids: ['decision'], icon: svg('<path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/>') }
+];
+const NODE_STATE_TEXT = { idle: 'waiting', running: 'running', done: 'done', warn: 'warning', fail: 'flagged', skipped: 'skipped' };
+
+// 5-stop LUT: transparent below 0.12, then blue, cyan, gold, crimson.
+const LUT = (() => {
+  const stops = [[0.12, [37, 99, 235]], [0.3, [37, 99, 235]], [0.52, [34, 211, 238]], [0.74, [251, 191, 36]], [1, [244, 63, 94]]];
+  return Array.from({ length: 256 }, (_, i) => {
+    const v = i / 255;
+    if (v < 0.12) return [0, 0, 0, 0];
+    let k = 1;
+    while (k < stops.length - 1 && v > stops[k][0]) k++;
+    const [v0, c0] = stops[k - 1];
+    const [v1, c1] = stops[k];
+    const t = Math.min(1, (v - v0) / (v1 - v0));
+    const rgb = c0.map((x, j) => Math.round(x + (c1[j] - x) * t));
+    return [...rgb, Math.round(255 * Math.min(1, (v - 0.12) / 0.18))];
+  });
+})();
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+const pct = p => (Math.round(Number(p) * 1000) / 10).toFixed(1);
+const clsName = c => /\d/.test(c) ? String(c) : String(c).toLowerCase().replace(/(^|[\s_-])\w/g, m => m.toUpperCase());
+const shortName = n => String(n).split(':')[0];
+
+const el = {
+  conn: $('#conn'), connText: $('#connText'), models: $('#models'), samples: $('#samples'),
+  stage: $('#stage'), drop: $('#drop'), upload: $('#uploadBtn'), input: $('#fileInput'),
+  dropErr: $('#dropErr'), stageErr: $('#stageErr'), cap: $('#capText'), reset: $('#resetBtn'),
+  photo: $('#photo'), photoFrame: $('#photoFrame'), pipe: $('#pipe'), pop: $('#pop'),
+  heat: $('#heat'), base: $('#base'), over: $('#over'), tog: $('#heatTog'), note: $('#heatNote'),
+  lat: $('#lat'), c1: $('#c1'), c2: $('#c2'), c3: $('#c3'),
+  modal: $('#modal'), chk: $('#consentChk'), go: $('#consentGo'), cancel: $('#consentCancel'), live: $('#live')
+};
+
+const S = {
+  models: [], modelId: 5, samples: [], file: null, url: null, baseFor: null,
+  ctrl: null, run: 0, retry: null, data: null, heatOn: true, hasHeat: false,
+  pending: null, openNode: -1, consent: false, online: null
+};
+
+/* ---------- helpers ---------- */
+function announce(msg) { el.live.textContent = ''; requestAnimationFrame(() => { el.live.textContent = msg; }); }
+function showErr(msg) { el.dropErr.textContent = msg; el.stageErr.textContent = msg; }
+function setConn(s) {
+  if (S.online === s) return;
+  S.online = s;
+  el.conn.dataset.s = s;
+  el.connText.textContent = { connecting: 'Connecting...', online: 'API Online', waking: 'Server waking up...' }[s];
+}
+function model(id = S.modelId) { return S.models.find(m => m.id === id); }
+function stageActive(m, id) {
+  const s = m && Array.isArray(m.stages) ? m.stages.find(x => x.id === id) : null;
+  return s ? !!s.active : true;
+}
+async function getJSON(path) {
+  const r = await fetch(API_BASE + path, { cache: 'no-store', signal: AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined });
+  if (!r.ok) throw new Error(String(r.status));
+  return r.json();
+}
+
+/* ---------- backend connection ---------- */
+async function connect() {
+  try {
+    await getJSON('/health');
+    setConn('online');
+    const list = await getJSON('/models');
+    S.models = list.slice().sort((a, b) => b.id - a.id);
+    if (!model()) S.modelId = S.models.length ? S.models[0].id : 5;
+    renderModels();
+    if (!S.file) renderIdleOutputs(false);
+  } catch {
+    if (S.online !== 'waking') announce(STARTING);
+    setConn('waking');
+    const msg = document.getElementById('modelsMsg');
+    if (msg) msg.textContent = STARTING;
+    setTimeout(connect, RETRY_MS);
+  }
+}
+
+/* ---------- models ---------- */
+function renderModels() {
+  el.models.innerHTML = S.models.map(m =>
+    `<button class="model" type="button" data-id="${m.id}" aria-pressed="${m.id === S.modelId}" title="${esc(m.description)}">` +
+    `<b>${esc(m.name)}</b><span>${esc(m.description)}</span></button>`
+  ).join('') || '<p class="muted">No models loaded on the server.</p>';
+}
+function selectModel(id) {
+  if (id === S.modelId) return;
+  S.modelId = id;
+  el.models.querySelectorAll('.model').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.id === id)));
+  const m = model();
+  if (S.file) analyze();
+  else { renderIdleOutputs(false); announce(`${m ? m.name : 'Model ' + id} selected`); }
+}
+el.models.addEventListener('click', e => {
+  const b = e.target.closest('.model');
+  if (b) selectModel(+b.dataset.id);
+});
+el.models.addEventListener('keydown', e => {
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+  const rows = [...el.models.querySelectorAll('.model')];
+  const i = rows.indexOf(document.activeElement);
+  if (i < 0) return;
+  e.preventDefault();
+  const next = rows[Math.max(0, Math.min(rows.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))];
+  next.focus();
+  next.scrollIntoView({ block: 'nearest' });
+});
+$('#bench').addEventListener('click', () => {});
+
+/* ---------- samples ---------- */
+async function loadSamples() {
+  const empty = '<p class="muted">No samples yet. Add images to images/ and list them in images/manifest.json.</p>';
+  try {
+    const r = await fetch('/images/manifest.json', { cache: 'no-store' });
+    if (!r.ok) throw new Error();
+    const raw = await r.json();
+    S.samples = (Array.isArray(raw) ? raw : [])
+      .map(e => typeof e === 'string' ? { file: e, name: e } : { file: e && e.file, name: (e && (e.name || e.file)) || '' })
+      .filter(e => e.file);
+    if (!S.samples.length) throw new Error();
+    el.samples.innerHTML = S.samples.map((s, i) =>
+      `<button class="sample" type="button" draggable="true" data-i="${i}" aria-label="Analyze sample ${esc(s.name)}">` +
+      `<img src="/images/${encodeURIComponent(s.file)}" alt="Sample chest X-ray ${esc(s.name)}" loading="lazy" draggable="false">` +
+      `<span>${esc(s.name)}</span></button>`
+    ).join('');
+    el.samples.querySelectorAll('img').forEach(img => img.addEventListener('error', () => {
+      img.closest('.sample').remove();
+      if (!el.samples.querySelector('.sample')) el.samples.innerHTML = empty;
+    }, { once: true }));
+  } catch {
+    el.samples.innerHTML = empty;
+  }
+}
+el.samples.addEventListener('click', e => {
+  const b = e.target.closest('.sample');
+  if (b) useSample(+b.dataset.i);
+});
+el.samples.addEventListener('dragstart', e => {
+  const b = e.target.closest('.sample');
+  if (!b) return;
+  e.dataTransfer.setData(SAMPLE_MIME, b.dataset.i);
+  e.dataTransfer.setData('text/plain', S.samples[+b.dataset.i].name);
+  e.dataTransfer.effectAllowed = 'copy';
+  const img = b.querySelector('img');
+  if (img && e.dataTransfer.setDragImage) e.dataTransfer.setDragImage(img, 48, 48);
+});
+
+function useSample(i) {
+  const s = S.samples[i];
+  if (!s) return;
+  requireConsent(async () => {
+    try {
+      const r = await fetch(`/images/${encodeURIComponent(s.file)}`);
+      if (!r.ok) throw new Error();
+      const blob = await r.blob();
+      const type = TYPES.includes(blob.type) ? blob.type : (/\.png$/i.test(s.file) ? 'image/png' : 'image/jpeg');
+      start(new File([blob], s.file, { type }), s.name);
+    } catch {
+      showErr('Could not load this sample.');
+    }
+  });
+}
+
+/* ---------- consent ---------- */
+try { S.consent = sessionStorage.getItem(CONSENT_KEY) === '1'; } catch { S.consent = false; }
+function requireConsent(fn) {
+  if (S.consent) return fn();
+  S.pending = fn;
+  el.chk.checked = false;
+  el.go.disabled = true;
+  el.modal.hidden = false;
+  el.chk.focus();
+}
+function closeModal() { el.modal.hidden = true; S.pending = null; }
+el.chk.addEventListener('change', () => { el.go.disabled = !el.chk.checked; });
+el.go.addEventListener('click', () => {
+  S.consent = true;
+  try { sessionStorage.setItem(CONSENT_KEY, '1'); } catch { /* storage blocked: keep in memory */ }
+  const fn = S.pending;
+  closeModal();
+  if (fn) fn();
+});
+el.cancel.addEventListener('click', closeModal);
+el.modal.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeModal();
+  if (e.key === 'Tab') {
+    const f = [el.chk, el.cancel, el.go].filter(x => !x.disabled);
+    const i = f.indexOf(document.activeElement);
+    if (e.shiftKey && i <= 0) { e.preventDefault(); f[f.length - 1].focus(); }
+    else if (!e.shiftKey && i === f.length - 1) { e.preventDefault(); f[0].focus(); }
+  }
+});
+
+/* ---------- upload & drop ---------- */
+el.upload.addEventListener('click', () => requireConsent(() => el.input.click()));
+el.input.addEventListener('change', () => {
+  const f = el.input.files && el.input.files[0];
+  el.input.value = '';
+  if (f) start(f, f.name);
+});
+el.stage.addEventListener('dragover', e => {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+  el.stage.classList.add('over');
+});
+el.stage.addEventListener('dragleave', e => {
+  if (!el.stage.contains(e.relatedTarget)) el.stage.classList.remove('over');
+});
+el.stage.addEventListener('drop', e => {
+  e.preventDefault();
+  el.stage.classList.remove('over');
+  const idx = e.dataTransfer.getData(SAMPLE_MIME);
+  if (idx !== '') return useSample(+idx);
+  const f = e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) requireConsent(() => start(f, f.name));
+});
+
+function validate(f) {
+  if (!TYPES.includes(f.type)) return 'Only JPEG or PNG images are accepted.';
+  if (f.size > MAX_BYTES) return 'Image is too large (max 15 MB).';
+  return '';
+}
+
+function start(file, label) {
+  const err = validate(file);
+  if (err) { showErr(err); announce(err); return; }
+  showErr('');
+  const wasIdle = el.stage.dataset.state !== 'active';
+  const first = wasIdle ? el.drop.getBoundingClientRect() : null;
+  S.file = file;
+  if (S.url) URL.revokeObjectURL(S.url);
+  S.url = URL.createObjectURL(file);
+  S.baseFor = null;
+  el.photo.onload = () => {
+    ensureBase();
+    if (wasIdle) flip(el.photoFrame, first);
+  };
+  el.photo.alt = `Uploaded chest X-ray: ${label}`;
+  el.photo.src = S.url;
+  el.cap.textContent = label;
+  el.stage.dataset.state = 'active';
+  analyze();
+}
+
+function flip(node, first) {
+  if (reduced.matches || !first || !node.animate) return;
+  const last = node.getBoundingClientRect();
+  if (!last.width || !last.height) return;
+  const dx = first.left + first.width / 2 - (last.left + last.width / 2);
+  const dy = first.top + first.height / 2 - (last.top + last.height / 2);
+  const sc = Math.min(first.width / last.width, first.height / last.height, 1.6);
+  node.animate(
+    [{ transform: `translate(${dx}px, ${dy}px) scale(${sc})`, opacity: 0.35 }, { transform: 'none', opacity: 1 }],
+    { duration: 500, easing: EASE }
+  );
+}
+
+function resetStage() {
+  S.run++;
+  if (S.ctrl) S.ctrl.abort();
+  clearTimeout(S.retry);
+  S.file = null;
+  S.data = null;
+  if (S.url) URL.revokeObjectURL(S.url);
+  S.url = null;
+  S.baseFor = null;
+  el.photo.removeAttribute('src');
+  el.stage.dataset.state = 'idle';
+  showErr('');
+  closePop();
+  setNodes(NODES.map(() => 'idle'));
+  renderIdleOutputs(false);
+  el.upload.focus();
+}
+el.reset.addEventListener('click', resetStage);
+
+/* ---------- pipeline nodes ---------- */
+el.pipe.innerHTML = NODES.map((n, i) =>
+  `<button class="node" type="button" data-n="${i}" data-s="idle" style="--i:${i}" aria-expanded="false" aria-controls="pop" aria-label="Step ${i + 1}, ${n.label}: waiting">` +
+  `<span class="ring">${n.icon}</span><small><b>${i + 1}</b>${n.label}</small></button>`
+).join('');
+const nodeEls = [...el.pipe.querySelectorAll('.node')];
+
+function setNodes(states) {
+  nodeEls.forEach((b, i) => {
+    b.dataset.s = states[i];
+    b.setAttribute('aria-label', `Step ${i + 1}, ${NODES[i].label}: ${NODE_STATE_TEXT[states[i]]}`);
+  });
+}
+function runningStates(m) {
+  return NODES.map(n => n.ids.some(id => stageActive(m, id)) ? 'running' : 'skipped');
+}
+function resolvedStates(d) {
+  const st = Object.fromEntries((d.stages || []).map(s => [s.id, s]));
+  const status = id => st[id] ? st[id].status : '';
+  const tierX = d.tier === 'X';
+  const check = ['scope_check', 'gemini_reader'].map(status);
+  return [
+    status('upload') === 'done' ? 'done' : status('upload') === 'failed' ? 'fail' : 'skipped',
+    status('preprocess') === 'done' ? 'done' : 'skipped',
+    tierX ? 'fail' : check.includes('failed') ? 'warn' : check.includes('done') ? 'done' : 'skipped',
+    status('resnet') === 'done' ? 'done' : status('resnet') === 'failed' ? 'fail' : 'skipped',
+    tierX ? 'fail' : ({ HIGH: 'fail', REVIEW: 'warn', LOW: 'done' }[d.risk] || 'skipped')
+  ];
+}
+
+function closePop() {
+  el.pop.hidden = true;
+  if (S.openNode >= 0) nodeEls[S.openNode].setAttribute('aria-expanded', 'false');
+  S.openNode = -1;
+}
+function openPop(i) {
+  closePop();
+  const n = NODES[i];
+  const stages = S.data ? (S.data.stages || []).filter(s => n.ids.includes(s.id)) : [];
+  const body = stages.length
+    ? stages.map(s =>
+        `<div class="row"><span>${esc(s.label)}</span><span>${esc(s.status)}, ${Number(s.latency_ms || 0).toFixed(1)} ms</span></div><p>${esc(s.detail)}</p>`
+      ).join('')
+    : `<p>${S.file ? 'Waiting for the server response.' : 'No image analyzed yet.'}</p>`;
+  el.pop.innerHTML = `<h3>${i + 1}. ${n.label}</h3>${body}`;
+  el.pop.hidden = false;
+  nodeEls[i].setAttribute('aria-expanded', 'true');
+  S.openNode = i;
+}
+el.pipe.addEventListener('click', e => {
+  const b = e.target.closest('.node');
+  if (!b) return;
+  const i = +b.dataset.n;
+  if (S.openNode === i) closePop(); else openPop(i);
+});
+document.addEventListener('click', e => {
+  if (S.openNode >= 0 && !e.target.closest('.pipe-wrap')) closePop();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && S.openNode >= 0) { const b = nodeEls[S.openNode]; closePop(); b.focus(); }
+});
+
+/* ---------- heatmap ---------- */
+async function ensureBase() {
+  const img = el.photo;
+  if (!img.getAttribute('src')) return;
+  try { await img.decode(); } catch { return; }
+  if (S.baseFor === img.src || !img.naturalWidth) return;
+  const k = Math.min(1, 1024 / Math.max(img.naturalWidth, img.naturalHeight));
+  const w = Math.max(1, Math.round(img.naturalWidth * k));
+  const h = Math.max(1, Math.round(img.naturalHeight * k));
+  for (const c of [el.base, el.over]) { c.width = w; c.height = h; }
+  el.base.getContext('2d').drawImage(img, 0, 0, w, h);
+  S.baseFor = img.src;
+}
+async function drawHeat(b64, run) {
+  await ensureBase();
+  const src = new Image();
+  src.src = 'data:image/png;base64,' + b64;
+  await src.decode();
+  if (run !== S.run) return false;
+  const t = document.createElement('canvas');
+  t.width = src.naturalWidth;
+  t.height = src.naturalHeight;
+  const tc = t.getContext('2d', { willReadFrequently: true });
+  tc.drawImage(src, 0, 0);
+  const img = tc.getImageData(0, 0, t.width, t.height);
+  const p = img.data;
+  for (let i = 0; i < p.length; i += 4) {
+    const c = LUT[p[i]];
+    p[i] = c[0]; p[i + 1] = c[1]; p[i + 2] = c[2]; p[i + 3] = c[3];
+  }
+  tc.putImageData(img, 0, 0);
+  const oc = el.over.getContext('2d');
+  oc.clearRect(0, 0, el.over.width, el.over.height);
+  oc.imageSmoothingEnabled = true;
+  oc.imageSmoothingQuality = 'high';
+  oc.drawImage(t, 0, 0, el.over.width, el.over.height);
+  return true;
+}
+function heatPending() {
+  el.heat.classList.remove('on', 'show');
+  el.tog.disabled = true;
+  el.note.textContent = 'Grad-CAM pending';
+}
+function heatReveal(has) {
+  S.hasHeat = has;
+  el.tog.disabled = !has;
+  el.heat.classList.add('on');
+  el.heat.classList.toggle('show', has && S.heatOn);
+  el.note.textContent = has ? '' : 'No heatmap for this result.';
+}
+el.tog.addEventListener('click', () => {
+  S.heatOn = !S.heatOn;
+  el.tog.setAttribute('aria-pressed', String(S.heatOn));
+  el.heat.classList.toggle('show', S.hasHeat && S.heatOn);
+});
+
+/* ---------- outputs ---------- */
+function probRow(c, p, top) {
+  const v = pct(p);
+  return `<div class="prob"><div class="pl"><span>${esc(clsName(c))}</span><span class="pct">${v}%</span></div>` +
+    `<div class="track" role="progressbar" aria-label="${esc(clsName(c))} probability" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${v}">` +
+    `<div class="fill${top ? ' top' : ''}" data-w="${v}"></div></div></div>`;
+}
+function waitRows(m) {
+  const classes = m && m.classes && m.classes.length ? m.classes : ['', '', ''];
+  return classes.map(c =>
+    `<div class="prob"><div class="pl"><span>${c ? esc(clsName(c)) : '&nbsp;'}</span><span class="pct"></span></div><div class="track wait"></div></div>`
+  ).join('');
+}
+function geminiMissingText(m) {
+  return stageActive(m, 'gemini_reader') && (m || S.modelId === 5)
+    ? 'Unavailable. The result uses the ResNet only.'
+    : 'Inactive in baseline model.';
+}
+function renderIdleOutputs(loading) {
+  const m = model();
+  el.lat.textContent = '';
+  el.c1.innerHTML = waitRows(m);
+  el.c2.innerHTML = m && !stageActive(m, 'gemini_reader')
+    ? '<p class="muted">Inactive in baseline model.</p>'
+    : `<p class="muted">${loading ? 'Waiting for the second reader.' : 'No image yet.'}</p>`;
+  el.c3.innerHTML = `<p class="muted">${loading ? 'Analyzing...' : 'Upload an image or pick a sample.'}</p>`;
+}
+function renderFailure(msg) {
+  renderIdleOutputs(false);
+  el.c3.innerHTML = `<p class="muted" style="color:var(--bad)">${esc(msg)}</p>`;
+}
+function renderOutputs(d) {
+  const m = model(d.model) || model();
+  el.lat.textContent = d.total_latency_ms != null ? `${Math.round(d.total_latency_ms)} ms` : '';
+
+  const probs = (d.resnet && d.resnet.probabilities) || {};
+  const order = ((m && m.classes) || []).filter(c => c in probs);
+  Object.keys(probs).forEach(c => { if (!order.includes(c)) order.push(c); });
+  if (!order.length) {
+    el.c1.innerHTML = '<p class="muted">Bypassed (out of scope)</p>';
+  } else {
+    const top = order.reduce((a, c) => (probs[c] > probs[a] ? c : a), order[0]);
+    el.c1.innerHTML = order.map(c => probRow(c, probs[c], c === top)).join('');
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      el.c1.querySelectorAll('.fill').forEach(f => { f.style.width = f.dataset.w + '%'; });
+    }));
+  }
+
+  const g = d.gemini;
+  el.c2.innerHTML = g
+    ? `<dl class="kv">` +
+        `<dt>Answer</dt><dd>${esc(clsName(g.cls))}</dd>` +
+        `<dt>Confidence</dt><dd class="pct">${pct(g.cls_conf)}%</dd>` +
+        `<dt>Chest X-ray probability</dt><dd class="pct">${pct(g.xray)}%</dd>` +
+        `<dt>Quality</dt><dd>${esc(g.quality)}</dd>` +
+      `</dl>`
+    : `<p class="muted">${geminiMissingText(m)}</p>`;
+
+  const ev = Array.isArray(d.evidence) ? d.evidence : [];
+  const tier = d.tier ? `<span>Tier <b style="color:${TIER_COLOR[d.tier] || 'var(--text)'}">${esc(d.tier)}</b></span>` : '';
+  el.c3.innerHTML =
+    `<p class="headline" style="color:${RISK_COLOR[d.risk] || RISK_COLOR.NONE}">${esc(d.headline)}</p>` +
+    `<p class="action">${esc(d.action)}</p>` +
+    `<p class="facts"><span>Readers: <b>${AGREE[d.agree] || 'Not applicable'}</b></span>${tier}</p>` +
+    (d.banner ? `<p class="banner">${esc(d.banner)}</p>` : '') +
+    (ev.length
+      ? `<button class="why" type="button" aria-expanded="false" aria-controls="evList">Why ${CHEVRON}</button>` +
+        `<ul class="ev" id="evList" hidden>${ev.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`
+      : '');
+}
+el.c3.addEventListener('click', e => {
+  const b = e.target.closest('.why');
+  if (!b) return;
+  const open = b.getAttribute('aria-expanded') !== 'true';
+  b.setAttribute('aria-expanded', String(open));
+  $('#evList').hidden = !open;
+});
+
+/* ---------- analysis ---------- */
+async function analyze() {
+  if (!S.file) return;
+  if (S.ctrl) S.ctrl.abort();
+  clearTimeout(S.retry);
+  const run = ++S.run;
+  const ctrl = new AbortController();
+  S.ctrl = ctrl;
+  S.data = null;
+  const m = model();
+  closePop();
+  setNodes(runningStates(m));
+  renderIdleOutputs(true);
+  heatPending();
+  ensureBase();
+  announce(`Analyzing with ${shortName(m ? m.name : 'Model ' + S.modelId)}`);
+
+  const fd = new FormData();
+  fd.append('file', S.file, S.file.name || 'image.png');
+  let res;
+  try {
+    res = await fetch(`${API_BASE}/analyze/${S.modelId}`, { method: 'POST', body: fd, signal: ctrl.signal });
+  } catch {
+    if (ctrl.signal.aborted || run !== S.run) return;
+    return retryLater(run);
+  }
+  if (run !== S.run) return;
+  if ([502, 503, 504].includes(res.status)) return retryLater(run);
+  if (!res.ok) return fail(HTTP_ERR[res.status] || `Analysis failed (HTTP ${res.status}).`);
+
+  let data;
+  try { data = await res.json(); } catch {
+    if (ctrl.signal.aborted || run !== S.run) return;
+    return fail('The server returned an unreadable response.');
+  }
+  if (run !== S.run) return;
+  render(data, run);
+}
+
+function retryLater(run) {
+  showErr(STARTING);
+  announce(STARTING);
+  setConn('waking');
+  S.retry = setTimeout(() => { if (run === S.run) analyze(); }, RETRY_MS);
+}
+
+function fail(msg) {
+  showErr(msg);
+  announce(msg);
+  setNodes(NODES.map(() => 'idle'));
+  renderFailure(msg);
+  heatReveal(false);
+  el.note.textContent = '';
+}
+
+function render(d, run) {
+  S.data = d;
+  showErr('');
+  setConn('online');
+  setNodes(resolvedStates(d));
+  renderOutputs(d);
+
+  const b64 = d.resnet && d.resnet.heatmap_png_base64;
+  if (b64) {
+    drawHeat(b64, run)
+      .then(ok => { if (ok && run === S.run) setTimeout(() => { if (run === S.run) heatReveal(true); }, reduced.matches ? 0 : 250); })
+      .catch(() => { if (run === S.run) heatReveal(false); });
+  } else {
+    el.over.getContext('2d').clearRect(0, 0, el.over.width, el.over.height);
+    heatReveal(false);
+  }
+
+  const m = model(d.model);
+  let msg = `Analysis complete: ${RISK_WORD[d.risk] || 'No reading'}`;
+  if (!d.gemini && stageActive(m, 'gemini_reader') && (m || d.model === 5)) msg += '. Gemini unavailable, using ResNet only';
+  announce(msg);
+}
+
+/* ---------- init ---------- */
+renderIdleOutputs(false);
+loadSamples();
+connect();
+</script>
+</body>
+</html>
