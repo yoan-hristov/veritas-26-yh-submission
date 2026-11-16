@@ -22,6 +22,19 @@ app.get('/config.js', (_req, res) => {
   res.type('application/javascript').set('Cache-Control', 'no-store').send(body);
 });
 
+// Editable site data: website_parameters.json and models/*.csv|json. Never cached, so edits show on refresh.
+const noStore = res => res.set('Cache-Control', 'no-store');
+app.get('/website_parameters.json', (_req, res) => {
+  noStore(res);
+  res.sendFile(path.join(__dirname, 'website_parameters.json'));
+});
+app.use(
+  '/models',
+  (req, res, next) => (/\.(csv|json)$/i.test(req.path) ? next() : res.sendStatus(404)),
+  express.static(path.join(__dirname, 'models'), { index: false, setHeaders: noStore })
+);
+app.use('/models', (_req, res) => res.sendStatus(404));
+
 app.use('/images', express.static(path.join(__dirname, 'images'), { maxAge: '1h' }));
 app.use('/images', (_req, res) => res.sendStatus(404));
 

@@ -1,0 +1,46 @@
+﻿section,benchmark,M1 ResNet-18 no-aug,M2 aug_targeted,M3 pc_blend,M4 gated (step 33),M5 Consensus Cascade,G Gemini alone
+A. Setup,Training data,Kermany train (patient split),Kermany train (patient split),Kermany train + COVID-QU-Ex (deduplicated),"COVID-QU-Ex, 1773 images after the Gemini gate",Kermany train + COVID-QU-Ex (deduplicated); Gemini only at inference,no training
+A. Setup,Augmentation / standardization,"none, ImageNet normalization only","targeted: frame swap, corner erase, rotation/crop; standardization",targeted (as M2); standardization,rotation + crop; per-image standardization,targeted (as M2/M3); standardization,x
+A. Setup,"Seeds, epochs","1, 5","3, 5","3, 5","3, 5","3, 5",x
+A. Setup,Images used for evaluation (n),624 (official Kermany test),624 (official Kermany test),624 (Kermany binary) / 6788 (COVID-QU-Ex 3-class),600 (COVID-QU-Ex test sample),200 Kermany + 498 COVID-QU-Ex,"200 (binary, Kermany) / 210 (3-class, COVID-QU-Ex)"
+B. Binary task (Kermany test),Recall (pneumonia caught),1.000,0.991,0.996,x,1.000,0.780
+B. Binary task (Kermany test),Specificity (normal cleared),0.436,0.694,0.594,x,0.953,0.980
+B. Binary task (Kermany test),Balanced accuracy,0.718,0.842,0.795,x,0.977,0.880
+B. Binary task (Kermany test),AUROC,0.893,0.977,0.968,x,0.989,0.961
+B. Binary task (Kermany test),Precision,0.747,0.847,0.804,x,0.970,0.975
+B. Binary task (Kermany test),Missed cases (FN) / false alarms (FP),0 / 132,3.7 / 71.7,1.7 / 95.0,x,0.0 / 2.7 (among answered; coverage 74%),22 / 2
+B. Binary task (Kermany test),Balanced accuracy 95% bootstrap range,0.69 to 0.75,0.831 to 0.891,0.760 to 0.823,x,"0.912 to 0.990 (seed 0, among answered)",x
+B. Binary task (Kermany test),Recall by tag: bacterial / viral,x,x,x,x,bacterial 1.00 / viral 1.00,bacterial 0.94 / viral 0.47
+C. Stability over seeds (mean +- std),Balanced accuracy (seeds),x,0.842 +- 0.056,0.795 +- 0.017,x,0.977 +- 0.013,x
+C. Stability over seeds (mean +- std),AUROC (seeds),x,0.977 +- 0.005,0.968 +- 0.005,x,0.989 +- 0.003,x
+C. Stability over seeds (mean +- std),auroc_lowest_2.5%,x,0.956,x,x,0.972,x
+D. Operating point chosen without the test set,Cut-off source and value,x,"validation, recall >= 0.98: 0.795, 0.697, 0.102","validation, recall >= 0.98: 0.732, 0.760, 0.886",x,"validation, frozen: T_RES 0.40, T_COVID 0.30, T_GEM 0.84 (seed 0)","dev sample, recall >= 0.95: t = 0.35"
+D. Operating point chosen without the test set,Recall @ chosen cut-off (test),x,0.991,0.991,x,1.000,0.970
+D. Operating point chosen without the test set,Specificity @ chosen cut-off (test),x,0.736,0.704,x,0.953,0.670
+E. Calibration,Temperature,x,1.37,"1.20 (P(COVID-19), seed 0)",x,"1.17 (ResNet reader, seed 0)",x
+E. Calibration,ECE,x,0.078,0.111,x,0.129,
+F. Shortcut audit,"AUROC, center only",0.95,0.965 +- 0.005,0.962 +- 0.007,x,0.963 +- 0.003,x
+F. Shortcut audit,"AUROC, frame only (lower is better)",0.879,0.757 +- 0.086,0.673 +- 0.016,x,0.652 +- 0.056,x
+F. Shortcut audit,follows_frame on swapped frames (0% ideal),49.3% +- 0.3%,20.9% +- 7.6%,22.2% +- 2.0%,x,21.5% +- 6.6%,x
+F. Shortcut audit,Counterfactual balanced accuracy,0.507 +- 0.003,0.791 +- 0.076,0.778 +- 0.020,x,0.785 +- 0.066,x
+F. Shortcut audit,Grad-CAM heat share on frame vs random-weights control,1.10 vs 0.88 (heat/area),0.76 vs 0.88 (heat/area),0.44 vs 0.88 (heat/area),x,x,x
+F. Shortcut audit,"Metadata-only probe AUROC (size, brightness, file size)",0.569,x,x,x,x,x
+G. 3-class task,Macro-F1 (3 classes),x,x,0.924,0.915 +- 0.007,0.956 +- 0.010,x
+G. 3-class task,Recall NORMAL,x,x,0.967,0.897 +- 0.002,0.954 +- 0.009,0.957
+G. 3-class task,Recall PNEUMONIA,x,x,0.896,0.907 +- 0.023,0.949 +- 0.021,0.671
+G. 3-class task,Recall COVID-19,x,x,0.914,0.942 +- 0.026,0.965 +- 0.004,0.229
+G. 3-class task,One-vs-rest AUROC per class (macro),x,x,x,0.986,0.977,x
+H. Cross-dataset,COVID sensitivity (external),x,x,0.947 (0.939 to 0.955),x,,x
+H. Cross-dataset,NORMAL specificity (external),x,x,0.500 (0.388 to 0.613),x,,x
+I. Selective prediction,Coverage of the answered band at the chosen threshold,x,1.000,x,,0.856 +- 0.022,
+I. Selective prediction,Error among answered at that threshold,x,0.067,x,,0.044 +- 0.010,
+I. Selective prediction,Error-vs-coverage AURC,x,0.034,x,0.014,x,
+I. Selective prediction,UNSURE rate (share not answered),x,x,x,x,0.144 +- 0.022,
+J. Comparison against another model,Paired bootstrap difference vs M2 (95% range),x,x,bal acc -0.070 (-0.097 to -0.048); AUROC -0.006 (-0.012 to -0.001),x,,x
+J. Comparison against another model,Difference vs baseline / random_drop control (macro-F1),x,x,x,gated-baseline +0.013; random_drop-baseline -0.006; seed std 0.023,x,x
+K. Gemini-specific,"Gemini quality label: restricted images (count, % per class)",x,x,x,"27 of 1800; NORMAL 0%, PNEUMONIA 0%, COVID-19 4%","Unacceptable 83, Noisy 363 of 698; tier X (no reading) 1",x
+K. Gemini-specific,Test error by Gemini quality label (High / Noisy / Unacceptable),x,x,x,High 0.07 (n=200) / Noisy 0.08 (n=318) / Unacceptable 0.04 (n=82),High 0.22 (n=252) / Noisy 0.09 (n=363) / Unacceptable 0.06 (n=83),x
+K. Gemini-specific,AUROC of Gemini score,x,x,x,x,0.962,0.961
+K. Gemini-specific,Gemini calls per image,x,x,x,"1 (quality question), training and test images",1 request (3 questions),1 request (several questions)
+L. Cost,Training time (per seed),,,,,2.3 min,x
+L. Cost,Number of API calls in total,x,x,x,about 2400 requests (cached),1100 (this session; cached answers cost nothing),about 820 requests (cached)

@@ -1,0 +1,25 @@
+{
+  "NameM5": "M5. Consensus Cascade /XRayNPC/",
+  "NameM4": "M4. Gemini-gated ResNet-16",
+  "NameM3": "M3. Multiclass blend",
+  "NameM2": "M2. Augmented Pneumonia",
+  "NameM1": "M1. Baseline",
+
+  "DescM5": "The state-of-art model in production, featuring custom decision table.",
+  "DescM4": "Trained only on images that Gemini classified as high-quality",
+  "DescM3": "Carefully calibrated ResNet-16 to extend Normal/Pneumonia/COVID",
+  "DescM2": "Custom augmentation improvements to destroy overfitting",
+  "DescM1": "The stupidest model in this project. Use for comparison.",
+
+  "GlowM5": 5,
+
+  "Links": [
+    { "name": "GitHub", "url": "https://github.com/yoan-hristov/veritas-26-yh-submission" },
+    { "name": "Colab", "url": "https://colab.research.google.com/drive/1ub5I0hqVbg8lDlvWvzLMc4wUbVkcX_3u" },
+    { "name": "YouTube", "url": "https://youtu.be/zRC3c4LqKks" },
+    { "name": "Writeup", "url": "https://drive.google.com/file/d/1HS0gdlYvSpGOVfdsz8X97QSlFtvRStP8/view" }
+  ],
+
+  "BestModel": "M5",
+  "LowerIsBetter": ["ECE", "follows_frame"]
+}

@@ -1,0 +1,64 @@
+{
+  "intro": "Two readers look at every image: ResNet-18 and Gemini. The conditions below are checked strictly from top to bottom. The first one that matches decides the final Tier.",
+  "terms": [
+    { "term": "Validity", "code": "Scope", "text": "The probability, according to Gemini, that the image is a chest X-ray. The minimum is scope_min (50%)." },
+    { "term": "Quality", "code": "Quality", "text": "Gemini's technical rating of the image: High, Noisy or Unacceptable. Currently quality_blocks = False, so poor quality only lowers the Tier from A to B and does not stop the analysis." },
+    { "term": "ResNet threshold", "code": "t_res", "text": "The calibrated confidence ResNet-18 needs for its answer to count as reliable (computed on validation for at most 10% error)." },
+    { "term": "Gemini threshold", "code": "t_gem", "text": "The minimum Gemini confidence in its diagnosis (default 80%)." },
+    { "term": "COVID override", "code": "t_covid", "text": "A special, higher ResNet-18 threshold for COVID-19 (computed for at least 90% precision; default 85%)." }
+  ],
+  "tiers": [
+    {
+      "tier": "X",
+      "title": "Not a chest X-ray or quality fails gate",
+      "condition": "Scope < 50% (does not look like a chest X-ray), or Quality is Unacceptable with at least 70% confidence when quality_blocks = True.",
+      "agree": ["N/A"],
+      "risk": ["NONE"],
+      "shows": ["The analysis stops (NO READING). The system refuses to give a diagnosis and asks for a new image."]
+    },
+    {
+      "tier": "U",
+      "title": "Gemini unavailable",
+      "condition": "Gemini is unavailable (error, timeout or missing API key).",
+      "agree": ["N/A"],
+      "risk": ["LOW / HIGH (if ResNet ≥ t_res)", "REVIEW (if ResNet < t_res)"],
+      "shows": ["Provisional result from one model only. A \"Scope not verified\" banner appears because nobody checked that the image is an X-ray."]
+    },
+    {
+      "tier": "A",
+      "title": "Both readers agree and both exceed thresholds",
+      "condition": "Both models agree AND ResNet ≥ t_res AND Gemini ≥ t_gem AND Quality is High.",
+      "agree": ["AGREE"],
+      "risk": ["LOW (NORMAL)", "HIGH (disease)"],
+      "shows": ["Highest certainty. Full agreement between both models with no remarks."]
+    },
+    {
+      "tier": "B",
+      "title": "Both readers agree, but one or both are weak",
+      "condition": "Both models agree, but with at least one remark: ResNet < t_res, OR Gemini < t_gem, OR Quality is not High.",
+      "agree": ["AGREE"],
+      "risk": ["LOW (NORMAL)", "HIGH (disease)"],
+      "shows": ["Agreement with a warning. The result is valid, and a \"Caution:\" text gives the exact reason (for example a noisy image or low confidence)."]
+    },
+    {
+      "tier": "C",
+      "title": "COVID override",
+      "condition": "The models disagree, but covid_override = True, ResNet says COVID-19 AND its confidence is ≥ t_covid.",
+      "agree": ["DISAGREE"],
+      "risk": ["HIGH"],
+      "shows": ["Special priority for COVID-19. Trust goes to ResNet-18, but confirmation by a physician is required."]
+    },
+    {
+      "tier": "D",
+      "title": "Readers disagree or etiologic suspicion is mixed",
+      "condition": "The models disagree and do not fall into Tier C.",
+      "agree": ["DISAGREE"],
+      "risk": ["REVIEW"],
+      "shows": [
+        "Mandatory human review.",
+        "URGENT REVIEW: both suspect disease, but different diseases (for example Pneumonia vs COVID-19).",
+        "REVIEW: one says NORMAL, the other suspects disease."
+      ]
+    }
+  ]
+}

@@ -17,7 +17,10 @@
     "Heatmap" toggle. Tier X (no heatmap) disables the toggle.
   - Outputs: ResNet probabilities as bars, Gemini reader, decision headline coloured by risk, "Why" list.
   - Deliberately skipped from FRONTEND.md: the 76px node diagram, SVG path draw-in and compaction step
-    (the mockup shows only the compact bar). "View benchmarks" is a no-op by request.
+    (the mockup shows only the compact bar).
+  - Upgrade: header link buttons (Rules + Links from website_parameters.json), Rules sheet (models/rules.json),
+    benchmark sheet (models/benchmarks_simple.csv coloured, benchmarks_full.csv plain), model name/description/glow
+    overrides from website_parameters.json. See Claude_Implementation_Report.md.
   - API base: window.XRAY_CONFIG.apiBase from /config.js (server.js reads env API_URL).
 -->
 <html lang="en">
@@ -71,10 +74,35 @@ svg { width: 18px; height: 18px; flex: none; }
 .muted { color: var(--muted); font-size: 13px; }
 
 /* Header */
-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 4px; }
+/* Two columns that mirror main, so the links sit above the upload box. */
+header { position: relative; display: grid; grid-template-columns: 320px minmax(0, 1fr); align-items: center; gap: 16px; }
+header > div:first-child { padding-left: 4px; }
+.links { width: min(100%, 420px); justify-self: center; display: flex; justify-content: space-between; gap: 6px; }
+.lk {
+  flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid rgba(59, 130, 246, 0.28);
+  border-radius: 8px;
+  background: rgba(37, 99, 235, 0.1);
+  color: #9bb4e0;
+  font-size: 12px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: background 200ms, color 200ms, border-color 200ms;
+}
+.lk svg { width: 14px; height: 14px; transition: color 200ms; }
+.lk:hover { background: rgba(37, 99, 235, 0.22); color: var(--text); }
+.lk:hover svg { color: var(--gold); }
+.lk.rules { background: var(--blue); border-color: var(--blue); color: #fff; font-weight: 600; }
+.lk.rules:hover { background: var(--blue-h); border-color: var(--blue-h); }
 h1 { font: 400 40px/1 var(--display); color: var(--cyan); text-shadow: 0 0 24px rgba(34, 211, 238, 0.35); }
 .sub { margin-top: 6px; font-size: 15px; color: var(--muted); }
-.conn { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.conn { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
 .conn[data-s="online"] { color: var(--ok); }
 .conn[data-s="waking"] { color: var(--warn); }
 
@@ -104,7 +132,7 @@ main { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 16px; mi
 .scroll::-webkit-scrollbar-thumb { background: #26324c; border-radius: 6px; }
 
 /* Models */
-.models { flex: 1; display: flex; flex-direction: column; gap: 8px; padding: 3px 6px 3px 3px; margin: -3px -6px -3px -3px; }
+.models { flex: 1; display: flex; flex-direction: column; gap: 8px; padding: 8px 10px 8px 8px; margin: -8px -10px -8px -8px; }
 .model {
   text-align: left;
   padding: 9px 12px;
@@ -125,6 +153,15 @@ main { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 16px; mi
   font-size: 13px;
   line-height: 1.35;
   color: var(--muted);
+}
+/* Slight RGB glow; --g is the relative size from website_parameters.json (GlowM5) */
+.model[data-glow] { animation: rgbglow 8s linear infinite; }
+@keyframes rgbglow {
+  0%, 100% { box-shadow: 0 0 calc(12px * var(--g)) rgba(244, 63, 94, 0.3); }
+  20% { box-shadow: 0 0 calc(12px * var(--g)) rgba(251, 191, 36, 0.3); }
+  40% { box-shadow: 0 0 calc(12px * var(--g)) rgba(16, 185, 129, 0.3); }
+  60% { box-shadow: 0 0 calc(12px * var(--g)) rgba(34, 211, 238, 0.3); }
+  80% { box-shadow: 0 0 calc(12px * var(--g)) rgba(129, 140, 248, 0.3); }
 }
 .linkbtn {
   align-self: center;
@@ -355,6 +392,101 @@ main { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 16px; mi
 .primary:hover:not(:disabled) { background: var(--blue-h); }
 .primary:disabled { opacity: 0.45; }
 
+/* Rules and benchmark sheets */
+.sheet { display: flex; flex-direction: column; width: 100%; max-width: 1000px; max-height: min(90dvh, 780px); padding: 18px; transition: max-width 200ms var(--ease), max-height 200ms var(--ease), width 200ms var(--ease), height 200ms var(--ease); }
+.sheet.sheet-wide { max-width: min(96vw, 1500px); width: 96vw; max-height: 94dvh; height: 94dvh; }
+.sheet-h { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.sheet-h h2 { font-size: 18px; font-weight: 600; }
+.sheet-b { flex: 1; min-height: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: #26324c transparent; }
+.sheet-f { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 14px; }
+.sheet-f .legend { margin-right: auto; }
+.x { padding: 6px; border-radius: 6px; color: var(--muted); transition: color 200ms, background 200ms; }
+.x:hover { color: var(--text); background: var(--raise); }
+.x svg { display: block; }
+.legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 12px; color: var(--muted); }
+.legend i { display: inline-block; width: 12px; height: 12px; margin-right: 6px; vertical-align: -1px; border: 1.5px solid; border-radius: 4px; }
+.legend .g i { border-color: var(--ok); background: rgba(16, 185, 129, 0.4); }
+.legend .y i { border-color: var(--warn); background: rgba(245, 158, 11, 0.15); }
+.legend .r i { border-color: var(--bad); background: rgba(244, 63, 94, 0.15); }
+.legend .b i { border-color: var(--blue-h); background: rgba(37, 99, 235, 0.35); }
+
+.bt { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+.bt th, .bt td { text-align: center; vertical-align: middle; }
+.bt thead th { padding: 10px 6px; font-weight: 400; background: transparent; }
+.bt thead b { display: block; font: 400 15px/1.2 var(--display); }
+.bt thead small { display: block; margin-top: 2px; font-size: 11px; line-height: 1.25; color: var(--muted); }
+.bt tbody th { padding: 4px 12px 4px 4px; text-align: left; font-weight: 500; white-space: nowrap; color: #cbd5e1; }
+.bt td { padding: 4px; }
+.v {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 46px;
+  min-height: 46px;
+  padding: 4px 8px;
+  border: 1.5px solid rgba(148, 163, 184, 0.14);
+  border-radius: 8px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  box-sizing: border-box;
+  background: rgba(19, 29, 51, 0.25);
+  transition: transform 150ms var(--ease), border-color 150ms, box-shadow 150ms;
+}
+.v small { display: block; margin-top: 2px; font-size: 11px; line-height: 1.1; color: var(--muted); }
+.v.g { background: rgba(16, 185, 129, 0.18); border-color: rgba(16, 185, 129, 0.75); color: #ecfdf5; font-weight: 600; box-shadow: 0 0 10px rgba(16, 185, 129, 0.12); }
+.v.y { background: rgba(245, 158, 11, 0.08); border-color: rgba(245, 158, 11, 0.75); color: #fef3c7; }
+.v.r { background: rgba(244, 63, 94, 0.08); border-color: rgba(244, 63, 94, 0.75); color: #ffe4e6; }
+.v.na-val { border-color: rgba(148, 163, 184, 0.14); background: transparent; }
+.na { color: var(--dim); font-size: 14px; }
+.bt tbody tr:hover .v { transform: translateY(-1px); }
+.bt tbody tr:hover .v.g { box-shadow: 0 0 14px rgba(16, 185, 129, 0.24); }
+.bt tbody tr:hover .v.y { box-shadow: 0 0 12px rgba(245, 158, 11, 0.16); }
+.bt tbody tr:hover .v.r { box-shadow: 0 0 12px rgba(244, 63, 94, 0.16); }
+
+.bt .bc { border-left: 2px solid var(--blue-h); border-right: 2px solid var(--blue-h); }
+.bt thead .bc { border-top: 2px solid var(--blue-h); border-radius: 10px 10px 0 0; background: var(--blue); }
+.bt tbody tr:last-child .bc { border-bottom: 2px solid var(--blue-h); border-radius: 0 0 10px 10px; }
+.bt tbody tr:last-child .bc, .bt tbody tr:last-child td { padding-bottom: 6px; }
+
+.ft { min-width: 1080px; width: 100%; border-collapse: separate; border-spacing: 0; }
+.ft thead th { position: sticky; top: 0; z-index: 2; padding: 10px 12px; background: #0d1321; border-bottom: 2px solid var(--line); text-align: center; font-weight: 500; }
+.ft thead th:first-child, .ft tbody th { text-align: left; }
+.ft thead b { display: block; font: 400 14px/1.2 var(--display); color: var(--text); }
+.ft thead small { display: block; margin-top: 3px; font-size: 11px; font-weight: 400; color: var(--muted); }
+.ft tbody th { position: sticky; left: 0; z-index: 1; min-width: 220px; padding: 8px 12px 8px 6px; background: #0d1321; font-weight: 500; font-size: 13px; }
+.ft td { padding: 8px 12px; border-top: 1px solid var(--line); color: var(--text); font-size: 13px; font-variant-numeric: tabular-nums; }
+.ft tbody th { border-top: 1px solid var(--line); }
+.ft .sec th { position: static; padding: 16px 6px 8px; border-top: 0; background: transparent; color: var(--cyan); font: 400 14px var(--display); }
+.ft tbody tr:hover td, .ft tbody tr:hover th:not(.sec th) { background: rgba(255, 255, 255, 0.03); }
+
+.rules-intro { margin-bottom: 14px; color: var(--muted); }
+.terms { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin-bottom: 18px; font-size: 13px; }
+.terms dt { font-weight: 600; white-space: nowrap; }
+.terms dt code { margin-left: 4px; font: 400 12px ui-monospace, Consolas, monospace; color: var(--cyan); }
+.terms dd { color: var(--muted); }
+
+.rt { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; line-height: 1.45; }
+.rt th { padding: 10px 12px; border-bottom: 2px solid var(--line); text-align: left; font-weight: 600; color: #cbd5e1; background: rgba(13, 19, 33, 0.4); }
+.rt td { padding: 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.rt tbody tr { transition: background 150ms; }
+.rt tbody tr:hover { background: rgba(255, 255, 255, 0.025); }
+.cond-title { display: block; font-size: 14px; font-weight: 600; color: #f8fafc; margin-bottom: 3px; }
+.cond-desc { font-size: 12px; color: var(--muted); line-height: 1.4; }
+.cond-shows p + p { margin-top: 4px; }
+.chip { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; white-space: nowrap; }
+.chip-agree { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
+.chip-disagree { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); }
+.chip-na { background: rgba(148, 163, 184, 0.12); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.25); }
+.chip-high { background: rgba(244, 63, 94, 0.15); color: #fb7185; border: 1px solid rgba(244, 63, 94, 0.4); }
+.chip-low { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
+.chip-review { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); }
+.chip-none { background: rgba(100, 116, 139, 0.15); color: #94a3b8; border: 1px solid rgba(100, 116, 139, 0.3); }
+
+.tb { display: grid; place-items: center; width: 30px; height: 30px; border: 1.5px solid var(--tc); border-radius: 8px; background: color-mix(in srgb, var(--tc) 16%, transparent); color: var(--tc); font: 400 14px var(--display); box-shadow: 0 0 10px color-mix(in srgb, var(--tc) 20%, transparent); }
+.t-U { --tc: #94a3b8; } .t-X { --tc: #f43f5e; } .t-A { --tc: #10b981; } .t-B { --tc: #f59e0b; } .t-C { --tc: #ec4899; } .t-D { --tc: #818cf8; }
+.bmsg { padding: 24px 0; text-align: center; color: var(--muted); }
+
 @keyframes draw { from { transform: scaleX(0); } }
 @keyframes pop { from { opacity: 0; transform: translateY(6px) scale(0.9); } }
 @keyframes pulse { 50% { box-shadow: 0 0 0 6px rgba(59, 130, 246, 0.2); } }
@@ -366,13 +498,17 @@ main { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 16px; mi
   .cols .c { overflow-y: auto; scrollbar-width: thin; scrollbar-color: #26324c transparent; }
 }
 @media (max-width: 1099px) {
+  body { grid-template-rows: auto auto; }
+  header { grid-template-columns: minmax(0, 1fr) auto; }
+  .links { grid-column: 1 / -1; grid-row: 2; justify-self: start; }
+  .conn { position: static; transform: none; }
   .left, .right { grid-template-rows: auto auto; }
   .models { max-height: 320px; }
   .stage { min-height: 480px; }
 }
 @media (max-width: 899px) {
   body { grid-template-rows: auto auto; }
-  header { flex-wrap: wrap; }
+  .links { justify-self: stretch; width: 100%; }
   h1 { font-size: 34px; }
   main { grid-template-columns: minmax(0, 1fr); }
   .samples { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -385,6 +521,7 @@ main { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 16px; mi
   .c:not(:last-child) { border-right: 0; border-bottom: 1px solid var(--line); padding-bottom: 14px; margin-bottom: 14px; }
 }
 @media (prefers-reduced-motion: reduce) {
+  .model[data-glow] { animation: none; box-shadow: 0 0 calc(12px * var(--g)) rgba(129, 140, 248, 0.3); }
   *, *::before, *::after { animation-duration: 0s !important; animation-delay: 0s !important; animation-iteration-count: 1 !important; transition-duration: 0s !important; }
 }
 </style>
@@ -395,6 +532,12 @@ main { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 16px; mi
     <h1>XRayNPC</h1>
     <p class="sub">An advanced tool for X-ray image analysis</p>
   </div>
+  <nav class="links" id="links" aria-label="Project links">
+    <button class="lk rules" type="button" id="rulesBtn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+      Rules
+    </button>
+  </nav>
   <p class="conn" id="conn" data-s="connecting">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
     <span id="connText">Connecting...</span>
@@ -483,6 +626,36 @@ main { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 16px; mi
   </div>
 </div>
 
+<div class="modal" id="rulesModal" hidden>
+  <div class="panel sheet" role="dialog" aria-modal="true" aria-labelledby="rulesH">
+    <div class="sheet-h">
+      <h2 id="rulesH">How the decision is made</h2>
+      <button class="x" type="button" data-close aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="sheet-b" id="rulesBody"></div>
+    <div class="sheet-f"><button class="primary" type="button" data-close>OK</button></div>
+  </div>
+</div>
+
+<div class="modal" id="benchModal" hidden>
+  <div class="panel sheet" role="dialog" aria-modal="true" aria-labelledby="benchH">
+    <div class="sheet-h">
+      <h2 id="benchH">Benchmarks</h2>
+      <button class="x" type="button" data-close aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="sheet-b" id="benchBody"></div>
+    <div class="sheet-f">
+      <div class="legend" id="benchLegend"></div>
+      <button class="ghost" type="button" id="benchSwitch">View extended benchmarking</button>
+      <button class="primary" type="button" data-close>OK</button>
+    </div>
+  </div>
+</div>
+
 <div class="sr" id="live" aria-live="polite"></div>
 
 <script>
@@ -504,7 +677,7 @@ const HTTP_ERR = {
 };
 const RISK_COLOR = { HIGH: 'var(--bad)', REVIEW: 'var(--warn)', LOW: 'var(--ok)', NONE: 'var(--muted)' };
 const RISK_WORD = { HIGH: 'High risk', REVIEW: 'Needs review', LOW: 'Low risk', NONE: 'No reading' };
-const TIER_COLOR = { A: 'var(--ok)', B: 'var(--warn)', C: 'var(--bad)', D: 'var(--warn)', X: 'var(--muted)' };
+const TIER_COLOR = { U: '#94a3b8', X: '#f43f5e', A: '#10b981', B: '#f59e0b', C: '#ec4899', D: '#818cf8' };
 const AGREE = { AGREE: 'Agree', DISAGREE: 'Disagree' };
 
 const svg = d => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
@@ -582,6 +755,7 @@ async function connect() {
   try {
     await getJSON('/health');
     setConn('online');
+    await paramsReady;
     const list = await getJSON('/models');
     S.models = list.slice().sort((a, b) => b.id - a.id);
     if (!model()) S.modelId = S.models.length ? S.models[0].id : 5;
@@ -597,11 +771,21 @@ async function connect() {
 }
 
 /* ---------- models ---------- */
+// Name, description and glow come from website_parameters.json (NameM#, DescM#, GlowM#) when set.
+function glowSize(id) {
+  const v = P['GlowM' + id];
+  if (v === undefined) return id === 5 ? 1 : 0;
+  return v === true ? 1 : Math.max(0, Number(v) || 0);
+}
 function renderModels() {
-  el.models.innerHTML = S.models.map(m =>
-    `<button class="model" type="button" data-id="${m.id}" aria-pressed="${m.id === S.modelId}" title="${esc(m.description)}">` +
-    `<b>${esc(m.name)}</b><span>${esc(m.description)}</span></button>`
-  ).join('') || '<p class="muted">No models loaded on the server.</p>';
+  el.models.innerHTML = S.models.map(m => {
+    const name = String(P['NameM' + m.id] || '').trim() || m.name;
+    const desc = String(P['DescM' + m.id] || '').trim() || m.description;
+    const g = glowSize(m.id);
+    return `<button class="model" type="button" data-id="${m.id}" aria-pressed="${m.id === S.modelId}" title="${esc(desc)}"` +
+      (g ? ` data-glow style="--g:${g}"` : '') + `>` +
+      `<b>${esc(name)}</b><span>${esc(desc)}</span></button>`;
+  }).join('') || '<p class="muted">No models loaded on the server.</p>';
 }
 function selectModel(id) {
   if (id === S.modelId) return;
@@ -625,7 +809,223 @@ el.models.addEventListener('keydown', e => {
   next.focus();
   next.scrollIntoView({ block: 'nearest' });
 });
-$('#bench').addEventListener('click', () => {});
+
+/* ---------- website parameters (website_parameters.json) ---------- */
+let P = {};
+const LINK_ICONS = {
+  github: svg('<path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/>'),
+  colab: svg('<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>'),
+  youtube: svg('<path d="M22.54 6.42a2.78 2.78 0 0 0-1.94-2C18.88 4 12 4 12 4s-6.88 0-8.6.46a2.78 2.78 0 0 0-1.94 2A29 29 0 0 0 1 11.75a29 29 0 0 0 .46 5.33A2.78 2.78 0 0 0 3.4 19c1.72.46 8.6.46 8.6.46s6.88 0 8.6-.46a2.78 2.78 0 0 0 1.94-2 29 29 0 0 0 .46-5.25 29 29 0 0 0-.46-5.33z"/><polygon points="9.75 15.02 15.5 11.75 9.75 8.48 9.75 15.02"/>'),
+  writeup: svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>')
+};
+const LINK_FALLBACK = svg('<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>');
+function renderLinks() {
+  const list = Array.isArray(P.Links) ? P.Links : [];
+  $('#links').querySelectorAll('a.lk').forEach(a => a.remove());
+  $('#links').insertAdjacentHTML('beforeend', list
+    .filter(l => l && l.name && l.url)
+    .map(l => `<a class="lk" href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${LINK_ICONS[String(l.name).toLowerCase()] || LINK_FALLBACK}${esc(l.name)}</a>`)
+    .join(''));
+}
+const paramsReady = fetch('/website_parameters.json', { cache: 'no-store' })
+  .then(r => (r.ok ? r.json() : {}))
+  .catch(() => ({}))
+  .then(p => {
+    P = p && typeof p === 'object' ? p : {};
+    renderLinks();
+    if (S.models.length) renderModels();
+  });
+
+/* ---------- rules & benchmark sheets ---------- */
+const SHEETS = { rules: $('#rulesModal'), bench: $('#benchModal') };
+let sheetOpen = null;
+let sheetOpener = null;
+function openSheet(key) {
+  sheetOpener = document.activeElement;
+  sheetOpen = key;
+  SHEETS[key].hidden = false;
+  SHEETS[key].querySelector('.primary').focus();
+}
+function closeSheet() {
+  if (!sheetOpen) return;
+  SHEETS[sheetOpen].hidden = true;
+  SHEETS.bench.querySelector('.sheet').classList.remove('sheet-wide');
+  sheetOpen = null;
+  if (sheetOpener && sheetOpener.focus) sheetOpener.focus();
+}
+Object.values(SHEETS).forEach(m => {
+  m.addEventListener('click', e => { if (e.target === m || e.target.closest('[data-close]')) closeSheet(); });
+  m.addEventListener('keydown', e => {
+    if (e.key !== 'Tab') return;
+    const f = [...m.querySelectorAll('button:not([disabled])')];
+    const i = f.indexOf(document.activeElement);
+    if (e.shiftKey && i <= 0) { e.preventDefault(); f[f.length - 1].focus(); }
+    else if (!e.shiftKey && i === f.length - 1) { e.preventDefault(); f[0].focus(); }
+  });
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && sheetOpen) closeSheet(); });
+
+const fileCache = {};
+function loadFile(path, kind) {
+  if (!fileCache[path]) {
+    fileCache[path] = fetch(path, { cache: 'no-store' })
+      .then(r => { if (!r.ok) throw new Error(path); return kind === 'json' ? r.json() : r.text(); })
+      .catch(err => { delete fileCache[path]; throw err; });
+  }
+  return fileCache[path];
+}
+
+/* Rules: models/rules.json */
+function chipAgree(a) {
+  const s = String(a).toUpperCase();
+  if (s === 'AGREE') return `<span class="chip chip-agree">AGREE</span>`;
+  if (s === 'DISAGREE') return `<span class="chip chip-disagree">DISAGREE</span>`;
+  return `<span class="chip chip-na">${esc(a)}</span>`;
+}
+function chipRisk(r) {
+  const s = String(r).toUpperCase();
+  if (s.startsWith('LOW')) return `<span class="chip chip-low">${esc(r)}</span>`;
+  if (s.startsWith('HIGH')) return `<span class="chip chip-high">${esc(r)}</span>`;
+  if (s.startsWith('REVIEW')) return `<span class="chip chip-review">${esc(r)}</span>`;
+  if (s === 'NONE') return `<span class="chip chip-none">NONE</span>`;
+  return `<span class="chip chip-na">${esc(r)}</span>`;
+}
+function rulesHTML(r) {
+  return `<p class="rules-intro">${esc(r.intro)}</p>` +
+    `<dl class="terms">${(r.terms || []).map(t => `<dt>${esc(t.term)}<code>${esc(t.code)}</code></dt><dd>${esc(t.text)}</dd>`).join('')}</dl>` +
+    `<table class="rt"><thead><tr><th style="width:54px;">Tier</th><th style="min-width:260px;">Condition</th><th style="width:110px;">Agreement</th><th style="width:160px;">Risk</th><th>What you see on the site</th></tr></thead><tbody>` +
+    (r.tiers || []).map(t => {
+      const title = t.title || t.condition;
+      const detail = t.detail && t.detail !== title ? `<p class="cond-desc">${esc(t.detail)}</p>` : (t.title && t.condition !== title ? `<p class="cond-desc">${esc(t.condition)}</p>` : '');
+      const agreeList = (Array.isArray(t.agree) ? t.agree : [t.agree]).map(chipAgree).join(' ');
+      const riskList = (Array.isArray(t.risk) ? t.risk : [t.risk]).map(x => `<p style="margin:2px 0;">${chipRisk(x)}</p>`).join('');
+      const showsList = (Array.isArray(t.shows) ? t.shows : [t.shows]).map(x => `<p>${esc(x)}</p>`).join('');
+      return `<tr>` +
+        `<td><span class="tb t-${esc(t.tier)}">${esc(t.tier)}</span></td>` +
+        `<td><strong class="cond-title">${esc(title)}</strong>${detail}</td>` +
+        `<td>${agreeList}</td>` +
+        `<td>${riskList}</td>` +
+        `<td class="cond-shows">${showsList}</td>` +
+        `</tr>`;
+    }).join('') + `</tbody></table>`;
+}
+$('#rulesBtn').addEventListener('click', () => {
+  const body = $('#rulesBody');
+  body.innerHTML = '<p class="bmsg">Loading...</p>';
+  openSheet('rules');
+  loadFile('/models/rules.json', 'json')
+    .then(r => { body.innerHTML = rulesHTML(r); })
+    .catch(() => { body.innerHTML = '<p class="bmsg">Could not load models/rules.json.</p>'; });
+});
+
+/* Benchmarks: models/benchmarks_simple.csv (coloured) and models/benchmarks_full.csv (plain) */
+function parseCSV(text) {
+  const rows = [];
+  let row = [], f = '', q = false;
+  text = text.replace(/^﻿/, '');
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i + 1] === '"') { f += '"'; i++; } else q = false; }
+      else f += c;
+    } else if (c === '"') q = true;
+    else if (c === ',') { row.push(f); f = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(f); f = ''; rows.push(row); row = [];
+    } else f += c;
+  }
+  if (f !== '' || row.length) { row.push(f); rows.push(row); }
+  return rows.filter(r => r.some(x => x.trim() !== ''));
+}
+const isNA = s => { const t = String(s ?? '').trim().toLowerCase(); return t === '' || t === 'x' || t === '-'; };
+const firstNum = s => { const m = String(s).split('\n')[0].match(/-?\d+(?:\.\d+)?/); return m ? parseFloat(m[0]) : null; };
+const pm = s => esc(s).replace(/\+-\s*/g, '± ');
+function valHTML(s) {
+  if (isNA(s)) return '<span class="na">–</span>';
+  const [main, ...sub] = String(s).split('\n').map(x => x.trim()).filter(Boolean);
+  return pm(main) + sub.map(x => `<small>${pm(x)}</small>`).join('');
+}
+const splitHead = h => { const t = String(h).trim(); const i = t.indexOf(' '); return i < 0 ? [t, ''] : [t.slice(0, i), t.slice(i + 1)]; };
+
+// Per row: best value -> green fill, middle -> amber outline, weakest -> red outline.
+function gradeRow(vals, lower) {
+  const nums = vals.map(v => (isNA(v) ? null : firstNum(v)));
+  const ok = nums.filter(n => n !== null);
+  if (ok.length < 2) return nums.map(() => '');
+  const lo = Math.min(...ok), hi = Math.max(...ok);
+  if (hi === lo || (hi - lo) / Math.max(Math.abs(hi), Math.abs(lo)) < 0.02) return nums.map(n => (n === null ? '' : 'g'));
+  return nums.map(n => {
+    if (n === null) return '';
+    const s = lower ? (hi - n) / (hi - lo) : (n - lo) / (hi - lo);
+    return s >= 0.7 ? 'g' : s >= 0.3 ? 'y' : 'r';
+  });
+}
+function simpleHTML(rows, names) {
+  const cols = rows[0].slice(1).map(h => h.trim());
+  const best = cols.indexOf(String(P.BestModel || 'M5').trim());
+  const lowerSet = (Array.isArray(P.LowerIsBetter) ? P.LowerIsBetter : ['ECE', 'follows_frame']).map(x => String(x).trim().toLowerCase());
+  const bc = i => (i === best ? ' bc' : '');
+  let h = `<table class="bt"><thead><tr><th></th>` +
+    cols.map((c, i) => `<th class="${bc(i).trim()}"><b>${esc(c)}</b>${names[c] ? `<small>${esc(names[c])}</small>` : ''}</th>`).join('') +
+    `</tr></thead><tbody>`;
+  rows.slice(1).forEach(r => {
+    const vals = cols.map((_, i) => r[i + 1]);
+    const g = gradeRow(vals, lowerSet.includes(String(r[0]).trim().toLowerCase()));
+    h += `<tr><th scope="row">${esc(r[0])}</th>` +
+      vals.map((v, i) => `<td class="${bc(i).trim()}"><div class="v ${g[i] || 'na-val'}">${valHTML(v)}</div></td>`).join('') + `</tr>`;
+  });
+  return h + `</tbody></table>`;
+}
+function fullHTML(rows) {
+  const n = rows[0].length - 1;
+  let h = `<table class="bt ft"><thead><tr><th>Benchmark</th>` +
+    rows[0].slice(2).map(c => { const [a, b] = splitHead(c); return `<th><b>${esc(a)}</b>${b ? `<small>${esc(b)}</small>` : ''}</th>`; }).join('') +
+    `</tr></thead><tbody>`;
+  let sec = null;
+  rows.slice(1).forEach(r => {
+    if (r[0] !== sec) { sec = r[0]; h += `<tr class="sec"><th colspan="${n}">${esc(sec)}</th></tr>`; }
+    h += `<tr><th scope="row">${esc(r[1])}</th>` + rows[0].slice(2).map((_, i) => `<td>${valHTML(r[i + 2])}</td>`).join('') + `</tr>`;
+  });
+  return h + `</tbody></table>`;
+}
+
+const B = { view: 'simple' };
+const benchEl = { body: $('#benchBody'), title: $('#benchH'), sw: $('#benchSwitch'), legend: $('#benchLegend') };
+async function showBench(view) {
+  B.view = view;
+  const simple = view === 'simple';
+  const sheet = SHEETS.bench.querySelector('.sheet');
+  sheet.classList.toggle('sheet-wide', !simple);
+  benchEl.title.textContent = simple ? 'Benchmarks' : 'Extended benchmarks';
+  benchEl.sw.textContent = simple ? 'View extended benchmarking' : 'Simple benchmarking';
+  benchEl.legend.innerHTML = '';
+  benchEl.body.innerHTML = '<p class="bmsg">Loading...</p>';
+  try {
+    if (simple) {
+      const [s, f] = await Promise.all([
+        loadFile('/models/benchmarks_simple.csv', 'text'),
+        loadFile('/models/benchmarks_full.csv', 'text').catch(() => '')
+      ]);
+      if (B.view !== view) return;
+      const names = {};
+      const fr = parseCSV(f)[0] || [];
+      fr.slice(2).forEach(c => { const [k, v] = splitHead(c); if (v) names[k] = v; });
+      benchEl.body.innerHTML = simpleHTML(parseCSV(s), names);
+      const low = (Array.isArray(P.LowerIsBetter) ? P.LowerIsBetter : ['ECE', 'follows_frame']).join(', ');
+      benchEl.legend.innerHTML = '<span class="g"><i></i>Best</span><span class="y"><i></i>Middle</span><span class="r"><i></i>Weakest</span>' +
+        `<span class="b"><i></i>Best model</span><span>Lower is better: ${esc(low)}</span>`;
+    } else {
+      const f = await loadFile('/models/benchmarks_full.csv', 'text');
+      if (B.view !== view) return;
+      benchEl.body.innerHTML = fullHTML(parseCSV(f));
+    }
+  } catch {
+    if (B.view === view) benchEl.body.innerHTML = `<p class="bmsg">Could not load models/benchmarks_${simple ? 'simple' : 'full'}.csv.</p>`;
+  }
+}
+benchEl.sw.addEventListener('click', () => showBench(B.view === 'simple' ? 'full' : 'simple'));
+$('#bench').addEventListener('click', () => { openSheet('bench'); showBench('simple'); });
 
 /* ---------- samples ---------- */
 async function loadSamples() {
@@ -733,6 +1133,31 @@ el.stage.addEventListener('drop', e => {
   if (idx !== '') return useSample(+idx);
   const f = e.dataTransfer.files && e.dataTransfer.files[0];
   if (f) requireConsent(() => start(f, f.name));
+});
+
+/* ---------- paste anywhere (Ctrl+V) ---------- */
+window.addEventListener('paste', e => {
+  const target = e.target;
+  if (target && (target.tagName === 'TEXTAREA' || (target.tagName === 'INPUT' && target.type !== 'checkbox' && target.type !== 'file'))) {
+    return;
+  }
+  const items = e.clipboardData && e.clipboardData.items;
+  if (!items) return;
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (item.type && item.type.startsWith('image/')) {
+      const blob = item.getAsFile();
+      if (blob) {
+        e.preventDefault();
+        if (sheetOpen) closeSheet();
+        const ext = blob.type === 'image/jpeg' ? '.jpg' : '.png';
+        const name = (blob.name && blob.name !== 'image.png') ? blob.name : `Pasted image${ext}`;
+        const file = new File([blob], name, { type: blob.type || 'image/png' });
+        requireConsent(() => start(file, name));
+        return;
+      }
+    }
+  }
 });
 
 function validate(f) {

@@ -5,6 +5,7 @@ Optimized for 100% Free Hugging Face Spaces (Gradio SDK, 16 GB RAM).
 """
 
 import os
+os.environ["GRADIO_SSR_MODE"] = "False"  # must be set before gradio is imported
 import io
 import json
 import time
@@ -885,7 +886,10 @@ with gr.Blocks(title="Veritas AI: Chest Radiograph Consensus Cascade", theme=the
     )
 
 # Mount Gradio onto the FastAPI application at root ("/")
-app = gr.mount_gradio_app(app, demo, path="/")
+# ssr_mode=False: on HF Spaces, Gradio 5.x/6.x enables SSR by default, which starts a
+# Node proxy on GRADIO_SERVER_PORT (7860) and makes our uvicorn.run() fail with
+# "[Errno 98] address already in use".
+app = gr.mount_gradio_app(app, demo, path="/", ssr_mode=False)
 
 if __name__ == "__main__":
     import uvicorn
