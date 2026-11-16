@@ -7,4 +7,3 @@ npm-debug.log*
 dist/
 .cache/
 docs/
-structure.md

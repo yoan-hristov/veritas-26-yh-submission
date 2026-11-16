@@ -278,7 +278,7 @@ GEM_QUESTIONS = {
         "instructions": "Which of these is shown on this chest X-ray? Judge only from the image.",
         "criteria": {
             "NORMAL": "Clear lungs, no sign of pneumonia or COVID-19.",
-            "PNEUMONIA": "Bacterial or viral pneumonia that is NOT COVID-19.",
+            "PNEUMONIA": "Bacterial or viral pneumonia (non-COVID): focal lobar consolidation, patchy infiltrates, interstitial markings, or peribronchial thickening.",
             "COVID-19": "Pattern typical for COVID-19: bilateral, peripheral ground-glass opacities."
         }
     }

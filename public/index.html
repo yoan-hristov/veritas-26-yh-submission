@@ -460,7 +460,9 @@ main { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 16px; mi
 .ft .sec th { position: static; padding: 16px 6px 8px; border-top: 0; background: transparent; color: var(--cyan); font: 400 14px var(--display); }
 .ft tbody tr:hover td, .ft tbody tr:hover th:not(.sec th) { background: rgba(255, 255, 255, 0.03); }
 
-.rules-intro { margin-bottom: 14px; color: var(--muted); }
+.rules-intro { margin: 0 0 18px; padding-left: 1.4em; color: #f8fafc; font-size: 15px; font-weight: 600; line-height: 1.5; }
+.rules-intro li + li { margin-top: 5px; }
+.rules-intro li::marker { color: var(--cyan); }
 .terms { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin-bottom: 18px; font-size: 13px; }
 .terms dt { font-weight: 600; white-space: nowrap; }
 .terms dt code { margin-left: 4px; font: 400 12px ui-monospace, Consolas, monospace; color: var(--cyan); }
@@ -677,7 +679,7 @@ const HTTP_ERR = {
 };
 const RISK_COLOR = { HIGH: 'var(--bad)', REVIEW: 'var(--warn)', LOW: 'var(--ok)', NONE: 'var(--muted)' };
 const RISK_WORD = { HIGH: 'High risk', REVIEW: 'Needs review', LOW: 'Low risk', NONE: 'No reading' };
-const TIER_COLOR = { U: '#94a3b8', X: '#f43f5e', A: '#10b981', B: '#f59e0b', C: '#ec4899', D: '#818cf8' };
+const TIER_COLOR = { U: '#f43f5e', X: '#94a3b8', A: '#10b981', B: '#f59e0b', C: '#ec4899', D: '#818cf8' };
 const AGREE = { AGREE: 'Agree', DISAGREE: 'Disagree' };
 
 const svg = d => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
@@ -891,7 +893,7 @@ function chipRisk(r) {
   return `<span class="chip chip-na">${esc(r)}</span>`;
 }
 function rulesHTML(r) {
-  return `<p class="rules-intro">${esc(r.intro)}</p>` +
+  return `<ul class="rules-intro">${(Array.isArray(r.intro) ? r.intro : [r.intro]).map(item => `<li>${esc(item)}</li>`).join('')}</ul>` +
     `<dl class="terms">${(r.terms || []).map(t => `<dt>${esc(t.term)}<code>${esc(t.code)}</code></dt><dd>${esc(t.text)}</dd>`).join('')}</dl>` +
     `<table class="rt"><thead><tr><th style="width:54px;">Tier</th><th style="min-width:260px;">Condition</th><th style="width:110px;">Agreement</th><th style="width:160px;">Risk</th><th>What you see on the site</th></tr></thead><tbody>` +
     (r.tiers || []).map(t => {

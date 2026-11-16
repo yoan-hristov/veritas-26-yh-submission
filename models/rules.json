@@ -1,5 +1,9 @@
 {
-  "intro": "Two readers look at every image: ResNet-18 and Gemini. The conditions below are checked strictly from top to bottom. The first one that matches decides the final Tier.",
+  "intro": [
+    "Two readers look at every image: ResNet-18 and Gemini Decision 1.",
+    "The conditions below are checked strictly from top to bottom.",
+    "The first one that matches decides the final Tier."
+  ],
   "terms": [
     { "term": "Validity", "code": "Scope", "text": "The probability, according to Gemini, that the image is a chest X-ray. The minimum is scope_min (50%)." },
     { "term": "Quality", "code": "Quality", "text": "Gemini's technical rating of the image: High, Noisy or Unacceptable. Currently quality_blocks = False, so poor quality only lowers the Tier from A to B and does not stop the analysis." },
